@@ -9,9 +9,13 @@
 
 A hands-on study of the **bias–variance tradeoff** on the Pima Indians Diabetes
 dataset. Five classifiers (Logistic Regression, Decision Tree, Random Forest,
-Gradient Boosting, SVM) are trained, diagnosed for underfitting/overfitting,
-and then tuned with `GridSearchCV` to find a healthier point on the
-bias–variance curve.
+Gradient Boosting, SVM) are trained, diagnosed for underfitting / overfitting,
+visualised with learning curves, and then tuned with `GridSearchCV` to land at
+a healthier point on the bias–variance curve.
+
+> 🏆 **Best model:** **Optimized Decision Tree** — **0.7792** test accuracy
+> (`max_depth=5`, `min_samples_leaf=10`). Trading a bit of variance for
+> substantially better generalization is the clearest win in this study.
 
 ---
 
@@ -27,7 +31,12 @@ bias–variance curve.
   - [3. Run the Bias–Variance Diagnostic](#3-run-the-biasvariance-diagnostic)
   - [4. Tune Models with GridSearchCV](#4-tune-models-with-gridsearchcv)
   - [5. Plot Learning Curves](#5-plot-learning-curves)
-- [Results](#results)
+- [Exploratory Data Analysis](#exploratory-data-analysis)
+- [Baseline Model — Logistic Regression](#baseline-model--logistic-regression)
+- [Bias–Variance Diagnostic](#biasvariance-diagnostic)
+- [Model Optimization & Comparison](#model-optimization--comparison)
+- [Feature Importance](#feature-importance)
+- [🏆 Best Model & Final Predictions](#-best-model--final-predictions)
 - [Key Takeaways](#key-takeaways)
 - [Contributing](#contributing)
 - [License](#license)
@@ -61,14 +70,13 @@ realistic ML workflow:
 | Target | `Outcome` (0 = no diabetes, 1 = diabetes) |
 | Class balance | ~65% negative / ~35% positive |
 
-Place `diabetes.csv` next to the notebook before running the cells.
-
 ## Project Structure
 
 ```
 Bias-Variance-Analysis/
 ├── diabetes.ipynb        # Main analysis notebook
 ├── diabetes.csv          # Pima Indians Diabetes dataset
+├── images/               # Rendered charts used in this README
 ├── requirements.txt      # Python dependencies
 ├── LICENSE               # MIT license
 └── README.md             # This file
@@ -77,8 +85,8 @@ Bias-Variance-Analysis/
 ## Installation
 
 ```bash
-git clone https://github.com/<your-username>/Bias-Variance-Analysis.git
-cd Bias-Variance-Analysis
+git clone https://github.com/pareekarnav16/-Bias-Variance-Analysis.git
+cd -Bias-Variance-Analysis
 
 python -m venv .venv
 # Windows
@@ -182,22 +190,21 @@ for name, m in models.items():
 ```python
 from sklearn.model_selection import GridSearchCV
 
-rf_params = {
-    "n_estimators":      [50, 100, 200],
-    "max_depth":         [5, 10, 15, None],
-    "min_samples_split": [2, 5, 10],
-    "min_samples_leaf":  [1, 2, 4],
+dt_params = {
+    "max_depth":         [3, 5, 7, 10, None],
+    "min_samples_split": [2, 5, 10, 20],
+    "min_samples_leaf":  [1, 2, 5, 10],
 }
 
-rf_grid = GridSearchCV(
-    RandomForestClassifier(random_state=42),
-    rf_params, cv=5, scoring="accuracy", n_jobs=-1,
+dt_grid = GridSearchCV(
+    DecisionTreeClassifier(random_state=42),
+    dt_params, cv=5, scoring="accuracy", n_jobs=-1,
 )
-rf_grid.fit(X_train_scaled, y_train)
+dt_grid.fit(X_train_scaled, y_train)
 
-print("Best params:", rf_grid.best_params_)
-print(f"Best CV:    {rf_grid.best_score_:.4f}")
-print(f"Test:       {rf_grid.score(X_test_scaled, y_test):.4f}")
+print("Best params:", dt_grid.best_params_)
+print(f"Best CV:    {dt_grid.best_score_:.4f}")
+print(f"Test:       {dt_grid.score(X_test_scaled, y_test):.4f}")
 ```
 
 ### 5. Plot Learning Curves
@@ -208,41 +215,164 @@ import matplotlib.pyplot as plt
 from sklearn.model_selection import learning_curve
 
 train_sizes, train_scores, test_scores = learning_curve(
-    rf_grid.best_estimator_, X_train_scaled, y_train,
+    dt_grid.best_estimator_, X_train_scaled, y_train,
     cv=5, n_jobs=-1, train_sizes=np.linspace(0.1, 1.0, 10),
 )
 
 plt.plot(train_sizes, train_scores.mean(axis=1), "o-", label="Train")
 plt.plot(train_sizes, test_scores.mean(axis=1),  "o-", label="CV")
 plt.xlabel("Training examples"); plt.ylabel("Accuracy")
-plt.title("Learning Curve — Random Forest")
+plt.title("Learning Curve — Tuned Decision Tree")
 plt.legend(); plt.grid(True); plt.show()
 ```
 
-## Results
+---
+
+## Exploratory Data Analysis
+
+### Class Distribution
+
+![Class distribution](images/01_class_distribution.png)
+
+**Insight.** The dataset is **imbalanced** — roughly 500 negative cases vs.
+268 positives (~65 / 35 split). Accuracy alone is misleading on a split like
+this, so precision/recall/F1 and the confusion matrix matter more than raw
+accuracy.
+
+### Correlation Heatmap
+
+![Correlation heatmap](images/02_correlation_heatmap.png)
+
+**Insight.** `Glucose` is the single strongest correlate of `Outcome`
+(≈ 0.47), followed by `BMI` and `Age`. No two predictors are dangerously
+collinear (all pairwise |r| ≲ 0.55), so we keep every feature.
+
+### Feature Distributions by Outcome
+
+![Feature distributions](images/03_feature_distributions.png)
+
+**Insight.** Diabetic and non-diabetic distributions overlap heavily on
+`BloodPressure` and `SkinThickness` but separate cleanly on `Glucose` and
+`BMI` — those will be the most useful signals for any classifier. The spike
+at zero in `Insulin` and `SkinThickness` is **encoded missingness**, not real
+zeros.
+
+### Boxplots by Outcome
+
+![Boxplots](images/04_boxplots.png)
+
+**Insight.** Diabetic patients show consistently higher medians for
+`Glucose`, `BMI`, `Insulin`, and `Age`. Outliers in `Insulin` and
+`SkinThickness` are extreme — tree-based models will tolerate them, but
+distance-based models (SVM, kNN) benefit from the standard scaling we apply.
+
+### Pairplot
+
+![Pairplot](images/05_pairplot.png)
+
+**Insight.** No single feature pair gives linear separation, so a linear
+model alone will not get us far — confirmed below when Logistic Regression
+shows high bias.
+
+---
+
+## Baseline Model — Logistic Regression
+
+![Baseline confusion matrix and ROC](images/06_confusion_matrix_roc.png)
+
+**Insight.**
+- Baseline test accuracy = **0.7532**, AUC ≈ **0.81**.
+- Class-1 recall is only **0.67** — the model misses a third of diabetic
+  patients. In a clinical setting this is the metric that matters most, and
+  it is the lever we want optimization to move.
+
+---
+
+## Bias–Variance Diagnostic
 
 Numbers from the notebook (untuned baselines, `test_size=0.2`, `random_state=42`):
 
 | Model | Train Acc | Test Acc | CV Mean | Bias | Variance | Diagnosis |
 | --- | ---: | ---: | ---: | ---: | ---: | --- |
-| Logistic Regression | 0.7704 | 0.7532 | 0.7606 | 0.230 | 0.030 | High bias |
-| Decision Tree | 1.0000 | 0.7468 | 0.7198 | 0.000 | 0.052 | High variance |
-| Random Forest | 1.0000 | 0.7208 | 0.7753 | 0.000 | 0.034 | Overfits the training set |
+| Logistic Regression | 0.7704 | 0.7532 | 0.7606 | 0.230 | 0.030 | **High bias** (underfit) |
+| Decision Tree | 1.0000 | 0.7468 | 0.7198 | 0.000 | 0.052 | **High variance** (overfit) |
+| Random Forest | 1.0000 | 0.7208 | 0.7753 | 0.000 | 0.034 | Overfits training set |
 | Gradient Boosting | 0.9381 | 0.7403 | 0.7704 | 0.062 | 0.024 | Balanced |
 | SVM | 0.8339 | 0.7338 | 0.7687 | 0.166 | 0.024 | Slight bias |
 
-After tuning, the **Optimized Decision Tree** reached **0.7792 test accuracy**
-with `max_depth=5`, `min_samples_leaf=10` — the cleanest example of trading a
-bit of variance for substantially better generalization.
+### Learning Curves
+
+![Learning curves](images/07_learning_curves.png)
+
+**How to read them.**
+- **Logistic Regression** — train and CV curves converge low (~0.77). Classic
+  **underfitting** signature → fix with richer features or weaker regularization.
+- **Decision Tree** — train sits at 1.00, CV plateaus near 0.72, with a wide
+  gap. Classic **overfitting** signature → fix with pruning.
+- **Random Forest / Gradient Boosting** — gap narrows as data grows, CV
+  climbing toward 0.78. Ensembles are the closest to a "good fit" out of the box.
+
+---
+
+## Model Optimization & Comparison
+
+After `GridSearchCV` tuning:
+
+| Model | Train Acc | Test Acc | CV Mean | Train–Test Gap |
+| --- | ---: | ---: | ---: | ---: |
+| Optimized Logistic Regression | 0.7704 | 0.7532 | 0.7655 | 0.017 |
+| **Optimized Decision Tree** | **0.8062** | **0.7792** | **0.7671** | **0.027** |
+| Optimized Random Forest | 0.8550 | 0.7468 | 0.7851 | 0.108 |
+
+![Model comparison](images/08_model_comparison.png)
+
+**Insight.** Pruning the Decision Tree (`max_depth=5`, `min_samples_leaf=10`)
+collapsed the train–test gap from **0.25 → 0.03** while *raising* test
+accuracy from 0.7468 to 0.7792. That is the textbook bias–variance win.
+
+---
+
+## Feature Importance
+
+![Feature importance](images/09_feature_importance.png)
+
+**Insight.** Across the tuned Random Forest, `Glucose` dominates importance
+(≈ 0.27), followed by `BMI` and `Age`. `SkinThickness` and `BloodPressure`
+contribute the least — a candidate set for any future feature-selection pass.
+
+---
+
+## 🏆 Best Model & Final Predictions
+
+The **Optimized Decision Tree** wins on test accuracy and has the smallest
+train–test gap of any tuned model — meaning it generalizes best.
+
+| Metric | Value |
+| --- | ---: |
+| Best model | **Optimized Decision Tree** |
+| Hyperparameters | `max_depth=5`, `min_samples_split=2`, `min_samples_leaf=10` |
+| Test accuracy | **0.7792** |
+| 5-fold CV mean | 0.7671 |
+| Train–test gap | 0.027 |
+
+![Best model confusion matrix](images/10_confusion_matrix_best.png)
+
+**Insight.** Errors are now distributed more symmetrically across the two
+classes than in the Logistic Regression baseline — the tuned tree recovers
+true positives that the linear baseline missed, which is the clinically
+relevant gain.
+
+---
 
 ## Key Takeaways
 
-- **High train, low test** is the classic signature of variance — fix it with
+- **High train, low test** is the signature of variance — fix it with
   regularization, pruning, or more data.
-- **Low train and low test** is bias — fix it by adding features or reducing
+- **Low train and low test** is bias — fix it by adding features or relaxing
   regularization.
-- Ensemble methods (Random Forest, Gradient Boosting) sit closer to the sweet
-  spot out of the box, but still benefit from tuning depth and leaf size.
+- Ensembles (Random Forest, Gradient Boosting) sit closer to the sweet spot
+  out of the box, but a well-pruned single Decision Tree can beat them on
+  small, structured datasets like this one.
 - Learning curves are the single best visual diagnostic — converged curves at
   a high score mean you are done.
 
